@@ -826,6 +826,7 @@ class FpsSandboxWindow(pyglet.window.Window):
             self.shader["grid_strength"] = obj.grid_strength
             obj.mesh.draw(GL_TRIANGLES)
 
+        self.shader.stop()
         glDisable(GL_DEPTH_TEST)
         if self.menu_state is None:
             self.instructions.draw()
