@@ -8,6 +8,7 @@ The current build provides:
 - A free-look first-person camera
 - Block collision and grounded movement
 - Gravity, jumping, and glide descent
+- A limited sprint meter with recharge
 - A simple 3D test space with a ground grid and landmark objects
 - A minimal structure that can grow into a larger game
 
@@ -32,12 +33,14 @@ The game opens on the title screen first.
 
 ## Controls
 
-- Title screen buttons: `게임 시작`, `게임 방법`, `게임 종료`
+- Title screen buttons: `Start`, `How to Play`, `Quit`
 - `W`, `A`, `S`, `D`: move
 - `Mouse`: look around
 - `Space`: jump
 - Release `Space`, then hold it again in midair to glide and fall slowly
-- `Shift`: sprint
+- `Shift`: sprint for up to 2 seconds
+- Sprint recovers from empty to full in 5 seconds, and partial charge can be used immediately
+- A gray sprint gauge is shown at the top of the screen
 - `Tab`: toggle mouse capture during play
 - `Esc`: open or close the menu
 - `R`: reset camera position

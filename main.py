@@ -32,6 +32,8 @@ HUD_FONT = "Consolas"
 MOUSE_SENSITIVITY = 0.0025
 MOVE_SPEED = 8.0
 SPRINT_SPEED = 14.0
+SPRINT_MAX_SECONDS = 2.0
+SPRINT_RECOVERY_SECONDS = 5.0
 JUMP_SPEED = 11.0
 GRAVITY = 30.0
 GLIDE_GRAVITY = 7.5
@@ -40,6 +42,8 @@ GLIDE_FALL_SPEED = 4.0
 PLAYER_RADIUS = 0.35
 PLAYER_HEIGHT = 1.8
 PLAYER_EYE_HEIGHT = 1.62
+SPRINT_GAUGE_HEIGHT = 18
+SPRINT_GAUGE_TOP_MARGIN = 20
 
 VERTEX_SHADER = """
 #version 150
@@ -267,6 +271,8 @@ class FpsSandboxWindow(pyglet.window.Window):
         self.jump_requested = False
         self.glide_ready = False
         self.is_gliding = False
+        self.sprint_charge = 1.0
+        self.is_sprinting = False
         self.light_dir = (0.5, -1.0, 0.35)
         self.mouse_captured = False
         self.game_started = False
@@ -310,6 +316,20 @@ class FpsSandboxWindow(pyglet.window.Window):
             anchor_x="center",
             anchor_y="center",
             color=(12, 20, 28, 220),
+        )
+        self.sprint_gauge_background = pyglet.shapes.Rectangle(0, 0, 10, SPRINT_GAUGE_HEIGHT, color=(78, 78, 78))
+        self.sprint_gauge_background.opacity = 210
+        self.sprint_gauge_fill = pyglet.shapes.Rectangle(0, 0, 10, SPRINT_GAUGE_HEIGHT - 4, color=(176, 176, 176))
+        self.sprint_gauge_fill.opacity = 240
+        self.sprint_gauge_label = pyglet.text.Label(
+            "SPRINT",
+            font_name=HUD_FONT,
+            font_size=11,
+            x=self.width // 2,
+            y=self.height - 8,
+            anchor_x="center",
+            anchor_y="top",
+            color=(220, 220, 220, 255),
         )
         self._build_menu_ui()
         self._refresh_labels()
@@ -678,7 +698,7 @@ class FpsSandboxWindow(pyglet.window.Window):
 
     def _refresh_labels(self) -> None:
         self.instructions.text = (
-            "WASD move   SPACE jump   SHIFT sprint\n"
+            "WASD move   SPACE jump   SHIFT sprint (2s meter)\n"
             "Release SPACE, then hold it in midair to glide\n"
             "Mouse look   TAB toggle cursor capture   ESC menu\n"
             "Left click recaptures the mouse   R resets the start position"
@@ -689,7 +709,30 @@ class FpsSandboxWindow(pyglet.window.Window):
 
         self.crosshair.x = self.width // 2
         self.crosshair.y = self.height // 2
+        self._refresh_sprint_gauge()
         self._layout_menu_ui()
+
+    def _refresh_sprint_gauge(self) -> None:
+        gauge_width = min(320, max(self.width - 240, 180))
+        gauge_x = (self.width - gauge_width) / 2
+        gauge_y = self.height - SPRINT_GAUGE_TOP_MARGIN - SPRINT_GAUGE_HEIGHT
+        inner_width = max(gauge_width - 4, 1)
+        fill_width = inner_width * max(0.0, min(self.sprint_charge, 1.0))
+
+        self.sprint_gauge_background.x = gauge_x
+        self.sprint_gauge_background.y = gauge_y
+        self.sprint_gauge_background.width = gauge_width
+        self.sprint_gauge_background.height = SPRINT_GAUGE_HEIGHT
+
+        self.sprint_gauge_fill.x = gauge_x + 2
+        self.sprint_gauge_fill.y = gauge_y + 2
+        self.sprint_gauge_fill.width = fill_width
+        self.sprint_gauge_fill.height = SPRINT_GAUGE_HEIGHT - 4
+        self.sprint_gauge_fill.color = (188, 188, 188) if self.is_sprinting else (158, 158, 158)
+        self.sprint_gauge_fill.opacity = 250 if self.is_sprinting else 232
+
+        self.sprint_gauge_label.x = self.width // 2
+        self.sprint_gauge_label.y = gauge_y + SPRINT_GAUGE_HEIGHT + 12
 
     def set_capture(self, enabled: bool) -> None:
         self.mouse_captured = enabled
@@ -704,6 +747,7 @@ class FpsSandboxWindow(pyglet.window.Window):
         self.jump_requested = False
         self.glide_ready = False
         self.is_gliding = False
+        self.is_sprinting = False
         self._update_camera_position()
 
     def on_resize(self, width: int, height: int):
@@ -780,7 +824,8 @@ class FpsSandboxWindow(pyglet.window.Window):
         if self.keys[key.A]:
             move -= right
 
-        if move.length() > 0:
+        move_requested = move.length() > 0
+        if move_requested:
             move = move.normalize()
 
         if self.jump_requested and self.is_grounded:
@@ -795,7 +840,18 @@ class FpsSandboxWindow(pyglet.window.Window):
         gravity = GLIDE_GRAVITY if self.is_gliding else GRAVITY
         fall_speed_limit = GLIDE_FALL_SPEED if self.is_gliding else MAX_FALL_SPEED
         self.vertical_velocity = max(self.vertical_velocity - gravity * dt, -fall_speed_limit)
-        horizontal_speed = SPRINT_SPEED if self.keys[key.LSHIFT] or self.keys[key.RSHIFT] else MOVE_SPEED
+        sprint_requested = (self.keys[key.LSHIFT] or self.keys[key.RSHIFT]) and move_requested
+        if sprint_requested and self.sprint_charge > 0.0:
+            horizontal_speed = SPRINT_SPEED
+            self.sprint_charge = max(0.0, self.sprint_charge - dt / SPRINT_MAX_SECONDS)
+            if self.sprint_charge <= 1e-6:
+                self.sprint_charge = 0.0
+            self.is_sprinting = self.sprint_charge > 0.0
+        else:
+            horizontal_speed = MOVE_SPEED
+            self.is_sprinting = False
+            if not sprint_requested and self.sprint_charge < 1.0:
+                self.sprint_charge = min(1.0, self.sprint_charge + dt / SPRINT_RECOVERY_SECONDS)
         horizontal_move = move * horizontal_speed * dt
         self._move_player_axis(horizontal_move.x, "x")
         self._move_player_axis(horizontal_move.z, "z")
@@ -804,12 +860,14 @@ class FpsSandboxWindow(pyglet.window.Window):
             self.glide_ready = False
             self.is_gliding = False
         self._update_camera_position()
+        self._refresh_sprint_gauge()
 
         self.status.text = (
             f"pos=({self.camera_position.x:6.2f}, {self.camera_position.y:5.2f}, {self.camera_position.z:6.2f})   "
             f"yaw={math.degrees(self.yaw):6.1f}   pitch={math.degrees(self.pitch):5.1f}   "
             f"grounded={'yes' if self.is_grounded else 'no '}   "
-            f"glide={'on ' if self.is_gliding else 'off'}   vy={self.vertical_velocity:6.2f}"
+            f"glide={'on ' if self.is_gliding else 'off'}   "
+            f"sprint={self.sprint_charge * 100:5.1f}%   vy={self.vertical_velocity:6.2f}"
         )
 
     def on_draw(self) -> None:
@@ -827,6 +885,9 @@ class FpsSandboxWindow(pyglet.window.Window):
         self.shader.stop()
         glDisable(GL_DEPTH_TEST)
         if self.menu_state is None:
+            self.sprint_gauge_background.draw()
+            self.sprint_gauge_fill.draw()
+            self.sprint_gauge_label.draw()
             self.instructions.draw()
             self.status.draw()
             if self.mouse_captured:
