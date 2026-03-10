@@ -602,7 +602,7 @@ class FpsSandboxWindow(pyglet.window.Window):
 
     def _update_projection(self) -> None:
         aspect = self.width / max(self.height, 1)
-        self.projection = Mat4.perspective_projection(aspect, 0.1, 250.0, 75.0)
+        self.world_projection = Mat4.perspective_projection(aspect, 0.1, 250.0, 75.0)
 
     def build_view_matrix(self) -> Mat4:
         direction = self._forward_vector()
@@ -743,8 +743,6 @@ class FpsSandboxWindow(pyglet.window.Window):
             if symbol == key.ESCAPE:
                 if self.game_started:
                     self.start_game()
-                else:
-                    self.close()
             elif symbol in (key.ENTER, key.SPACE):
                 self.start_game()
             return
@@ -817,7 +815,7 @@ class FpsSandboxWindow(pyglet.window.Window):
     def on_draw(self) -> None:
         self.clear()
         self.shader.use()
-        self.shader["projection"] = self.projection
+        self.shader["projection"] = self.world_projection
         self.shader["view"] = self.build_view_matrix()
 
         for obj in self.scene:
