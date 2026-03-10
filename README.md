@@ -6,7 +6,7 @@ The current build provides:
 
 - A free-look first-person camera
 - Block collision and grounded movement
-- Gravity and jumping
+- Gravity, jumping, and glide descent
 - A simple 3D test space with a ground grid and landmark objects
 - A minimal structure that can grow into a larger game
 
@@ -32,6 +32,7 @@ python main.py
 - `W`, `A`, `S`, `D`: move
 - `Mouse`: look around
 - `Space`: jump
+- Release `Space`, then hold it again in midair to glide and fall slowly
 - `Shift`: sprint
 - `Tab`: toggle mouse capture
 - `Esc`: release mouse or close the game

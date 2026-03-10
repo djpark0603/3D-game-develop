@@ -30,7 +30,9 @@ MOVE_SPEED = 8.0
 SPRINT_SPEED = 14.0
 JUMP_SPEED = 11.0
 GRAVITY = 30.0
+GLIDE_GRAVITY = 7.5
 MAX_FALL_SPEED = 25.0
+GLIDE_FALL_SPEED = 4.0
 PLAYER_RADIUS = 0.35
 PLAYER_HEIGHT = 1.8
 PLAYER_EYE_HEIGHT = 1.62
@@ -229,6 +231,8 @@ class FpsSandboxWindow(pyglet.window.Window):
         self.vertical_velocity = 0.0
         self.is_grounded = True
         self.jump_requested = False
+        self.glide_ready = False
+        self.is_gliding = False
         self.light_dir = (0.5, -1.0, 0.35)
         self.mouse_captured = False
 
@@ -452,6 +456,7 @@ class FpsSandboxWindow(pyglet.window.Window):
     def _refresh_labels(self) -> None:
         self.instructions.text = (
             "WASD move   SPACE jump   SHIFT sprint\n"
+            "Release SPACE, then hold it in midair to glide\n"
             "Mouse look   TAB toggle cursor capture   ESC release or close\n"
             "Left click recaptures the mouse   R resets the start position"
         )
@@ -473,6 +478,8 @@ class FpsSandboxWindow(pyglet.window.Window):
         self.vertical_velocity = 0.0
         self.is_grounded = True
         self.jump_requested = False
+        self.glide_ready = False
+        self.is_gliding = False
         self._update_camera_position()
 
     def on_resize(self, width: int, height: int):
@@ -504,6 +511,12 @@ class FpsSandboxWindow(pyglet.window.Window):
         elif symbol == key.R:
             self.reset_camera()
 
+    def on_key_release(self, symbol: int, modifiers: int) -> None:
+        if symbol == key.SPACE:
+            if not self.is_grounded:
+                self.glide_ready = True
+            self.is_gliding = False
+
     def update(self, dt: float) -> None:
         dt = min(dt, 0.05)
         move = Vec3(0.0, 0.0, 0.0)
@@ -525,20 +538,30 @@ class FpsSandboxWindow(pyglet.window.Window):
         if self.jump_requested and self.is_grounded:
             self.vertical_velocity = JUMP_SPEED
             self.is_grounded = False
+            self.glide_ready = False
+            self.is_gliding = False
         self.jump_requested = False
 
-        self.vertical_velocity = max(self.vertical_velocity - GRAVITY * dt, -MAX_FALL_SPEED)
+        glide_pressed = self.keys[key.SPACE] and not self.is_grounded
+        self.is_gliding = self.glide_ready and glide_pressed and self.vertical_velocity < 0.0
+        gravity = GLIDE_GRAVITY if self.is_gliding else GRAVITY
+        fall_speed_limit = GLIDE_FALL_SPEED if self.is_gliding else MAX_FALL_SPEED
+        self.vertical_velocity = max(self.vertical_velocity - gravity * dt, -fall_speed_limit)
         horizontal_speed = SPRINT_SPEED if self.keys[key.LSHIFT] or self.keys[key.RSHIFT] else MOVE_SPEED
         horizontal_move = move * horizontal_speed * dt
         self._move_player_axis(horizontal_move.x, "x")
         self._move_player_axis(horizontal_move.z, "z")
         self.is_grounded = self._move_player_axis(self.vertical_velocity * dt, "y")
+        if self.is_grounded:
+            self.glide_ready = False
+            self.is_gliding = False
         self._update_camera_position()
 
         self.status.text = (
             f"pos=({self.camera_position.x:6.2f}, {self.camera_position.y:5.2f}, {self.camera_position.z:6.2f})   "
             f"yaw={math.degrees(self.yaw):6.1f}   pitch={math.degrees(self.pitch):5.1f}   "
-            f"grounded={'yes' if self.is_grounded else 'no '}   vy={self.vertical_velocity:6.2f}"
+            f"grounded={'yes' if self.is_grounded else 'no '}   "
+            f"glide={'on ' if self.is_gliding else 'off'}   vy={self.vertical_velocity:6.2f}"
         )
 
     def on_draw(self) -> None:
