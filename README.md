@@ -1,11 +1,43 @@
-# djpark0603.github.io
+# 3D Game Develop
 
-GitHub Pages personal site for `djpark0603`.
+Python first-person 3D sandbox prototype.
 
-## Local edit
+The current build provides:
 
-Open `index.html` directly in a browser, or use any static file server.
+- A free-look first-person camera
+- WASD movement with sprint and vertical flight
+- A simple 3D test space with a ground grid and landmark objects
+- A minimal structure that can grow into a larger game
 
-## Deploy
+## Requirements
 
-Push to the `main` branch of the `djpark0603.github.io` repository.
+- Python 3.14 or compatible
+- `pyglet` 2.1.13
+
+## Setup
+
+```powershell
+python -m pip install -r requirements.txt
+```
+
+## Run
+
+```powershell
+python main.py
+```
+
+## Controls
+
+- `W`, `A`, `S`, `D`: move
+- `Mouse`: look around
+- `Space` / `Ctrl`: move up and down
+- `Shift`: sprint
+- `Tab`: toggle mouse capture
+- `Esc`: release mouse or close the game
+- `R`: reset camera position
+
+## Next Steps
+
+- Add collision and gravity
+- Replace placeholder geometry with modular level pieces
+- Add interaction, UI, and game rules
