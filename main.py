@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 import os
 from dataclasses import dataclass
+from typing import Callable
 
 import pyglet
 
@@ -25,6 +26,9 @@ from pyglet.window import key, mouse
 
 WINDOW_WIDTH = 1280
 WINDOW_HEIGHT = 720
+WINDOW_TITLE = "점프맵"
+MENU_FONT = "Malgun Gothic"
+HUD_FONT = "Consolas"
 MOUSE_SENSITIVITY = 0.0025
 MOVE_SPEED = 8.0
 SPRINT_SPEED = 14.0
@@ -125,6 +129,36 @@ class SceneObject:
         return Aabb(self.position - half_scale, self.position + half_scale)
 
 
+@dataclass
+class MenuButton:
+    text: str
+    action: Callable[[], None]
+    rect: pyglet.shapes.Rectangle
+    label: pyglet.text.Label
+    hovered: bool = False
+
+    def contains(self, x: float, y: float) -> bool:
+        return self.rect.x <= x <= self.rect.x + self.rect.width and self.rect.y <= y <= self.rect.y + self.rect.height
+
+    def set_bounds(self, x: float, y: float, width: float, height: float) -> None:
+        self.rect.x = x
+        self.rect.y = y
+        self.rect.width = width
+        self.rect.height = height
+        self.label.x = x + width / 2
+        self.label.y = y + height / 2
+
+    def set_hovered(self, hovered: bool) -> None:
+        self.hovered = hovered
+        self.rect.color = (38, 140, 148) if hovered else (32, 60, 76)
+        self.rect.opacity = 235 if hovered else 215
+        self.label.color = (248, 252, 255, 255) if hovered else (227, 236, 241, 255)
+
+    def draw(self) -> None:
+        self.rect.draw()
+        self.label.draw()
+
+
 def build_cube_mesh(program: ShaderProgram):
     faces = [
         ((0.0, 0.0, 1.0), [(-0.5, -0.5, 0.5), (0.5, -0.5, 0.5), (0.5, 0.5, 0.5), (-0.5, 0.5, 0.5)]),
@@ -201,7 +235,7 @@ class FpsSandboxWindow(pyglet.window.Window):
             super().__init__(
                 width=WINDOW_WIDTH,
                 height=WINDOW_HEIGHT,
-                caption="Python FPS Sandbox",
+                caption=WINDOW_TITLE,
                 resizable=True,
                 config=config,
                 visible=visible,
@@ -211,7 +245,7 @@ class FpsSandboxWindow(pyglet.window.Window):
             super().__init__(
                 width=WINDOW_WIDTH,
                 height=WINDOW_HEIGHT,
-                caption="Python FPS Sandbox",
+                caption=WINDOW_TITLE,
                 resizable=True,
                 config=Config(double_buffer=True, depth_size=24),
                 visible=visible,
@@ -235,6 +269,9 @@ class FpsSandboxWindow(pyglet.window.Window):
         self.is_gliding = False
         self.light_dir = (0.5, -1.0, 0.35)
         self.mouse_captured = False
+        self.game_started = False
+        self.menu_state: str | None = "main"
+        self.menu_hover_button: MenuButton | None = None
 
         self.shader = self._build_shader()
         self.cube_mesh = build_cube_mesh(self.shader)
@@ -244,7 +281,7 @@ class FpsSandboxWindow(pyglet.window.Window):
 
         self.instructions = pyglet.text.Label(
             "",
-            font_name="Consolas",
+            font_name=HUD_FONT,
             font_size=12,
             x=16,
             y=self.height - 16,
@@ -256,7 +293,7 @@ class FpsSandboxWindow(pyglet.window.Window):
         )
         self.status = pyglet.text.Label(
             "",
-            font_name="Consolas",
+            font_name=HUD_FONT,
             font_size=12,
             x=16,
             y=16,
@@ -266,7 +303,7 @@ class FpsSandboxWindow(pyglet.window.Window):
         )
         self.crosshair = pyglet.text.Label(
             "+",
-            font_name="Consolas",
+            font_name=HUD_FONT,
             font_size=18,
             x=self.width // 2,
             y=self.height // 2,
@@ -274,11 +311,9 @@ class FpsSandboxWindow(pyglet.window.Window):
             anchor_y="center",
             color=(12, 20, 28, 220),
         )
+        self._build_menu_ui()
         self._refresh_labels()
-
-        if not pyglet.options["headless"]:
-            self.set_exclusive_mouse(True)
-            self.mouse_captured = True
+        self.open_menu("main")
 
         auto_close = float(os.getenv("FPS_DEMO_AUTOCLOSE_SECONDS", "0") or "0")
         if auto_close > 0:
@@ -377,6 +412,194 @@ class FpsSandboxWindow(pyglet.window.Window):
 
         return scene
 
+    def _build_menu_ui(self) -> None:
+        self.menu_overlay = pyglet.shapes.Rectangle(0, 0, self.width, self.height, color=(8, 14, 20))
+        self.menu_overlay.opacity = 160
+        self.menu_panel = pyglet.shapes.Rectangle(0, 0, 520, 420, color=(241, 233, 220))
+        self.menu_panel.opacity = 244
+        self.menu_accent = pyglet.shapes.Rectangle(0, 0, 520, 10, color=(32, 132, 140))
+        self.menu_accent.opacity = 255
+        self.menu_title = pyglet.text.Label(
+            "점프맵",
+            font_name=MENU_FONT,
+            font_size=38,
+            x=0,
+            y=0,
+            anchor_x="left",
+            anchor_y="baseline",
+            color=(25, 34, 49, 255),
+        )
+        self.menu_subtitle = pyglet.text.Label(
+            "점프와 글라이딩으로 블럭 사이를 돌파하는 3D 프로토타입",
+            font_name=MENU_FONT,
+            font_size=13,
+            x=0,
+            y=0,
+            width=420,
+            multiline=True,
+            anchor_x="left",
+            anchor_y="top",
+            color=(89, 94, 104, 255),
+        )
+        self.help_title = pyglet.text.Label(
+            "게임 방법",
+            font_name=MENU_FONT,
+            font_size=27,
+            x=0,
+            y=0,
+            anchor_x="left",
+            anchor_y="baseline",
+            color=(25, 34, 49, 255),
+        )
+        self.help_body = pyglet.text.Label(
+            "움직이기\n"
+            "W A S D : 이동\n"
+            "마우스 : 시점 회전\n"
+            "Shift : 빠르게 이동\n\n"
+            "액션\n"
+            "Space : 점프\n"
+            "공중에서 Space를 놓았다가\n"
+            "다시 누르고 유지 : 글라이딩\n"
+            "R : 시작 위치로 리셋\n"
+            "ESC : 메뉴 열기 / 닫기",
+            font_name=MENU_FONT,
+            font_size=14,
+            x=0,
+            y=0,
+            width=420,
+            multiline=True,
+            anchor_x="left",
+            anchor_y="top",
+            color=(57, 67, 78, 255),
+        )
+        self.main_menu_buttons = [
+            self._create_menu_button("게임 시작", self.start_game),
+            self._create_menu_button("게임 방법", self.show_help_menu),
+            self._create_menu_button("게임 종료", self.close),
+        ]
+        self.help_menu_buttons = [
+            self._create_menu_button("뒤로", self.show_main_menu),
+            self._create_menu_button("바로 시작", self.start_game),
+        ]
+        self._layout_menu_ui()
+
+    def _create_menu_button(self, text: str, action: Callable[[], None]) -> MenuButton:
+        rect = pyglet.shapes.Rectangle(0, 0, 100, 50, color=(32, 60, 76))
+        rect.opacity = 215
+        label = pyglet.text.Label(
+            text,
+            font_name=MENU_FONT,
+            font_size=16,
+            x=0,
+            y=0,
+            anchor_x="center",
+            anchor_y="center",
+            color=(227, 236, 241, 255),
+        )
+        button = MenuButton(text=text, action=action, rect=rect, label=label)
+        button.set_hovered(False)
+        return button
+
+    def _layout_menu_ui(self) -> None:
+        self.menu_overlay.width = self.width
+        self.menu_overlay.height = self.height
+
+        panel_width = min(560, max(self.width - 96, 360))
+        panel_height = 500 if self.menu_state == "help" else 420
+        panel_x = (self.width - panel_width) / 2
+        panel_y = (self.height - panel_height) / 2
+
+        self.menu_panel.x = panel_x
+        self.menu_panel.y = panel_y
+        self.menu_panel.width = panel_width
+        self.menu_panel.height = panel_height
+
+        self.menu_accent.x = panel_x
+        self.menu_accent.y = panel_y + panel_height - 14
+        self.menu_accent.width = panel_width
+
+        self.menu_title.x = panel_x + 42
+        self.menu_title.y = panel_y + panel_height - 72
+        self.menu_subtitle.x = panel_x + 42
+        self.menu_subtitle.y = panel_y + panel_height - 100
+        self.menu_subtitle.width = panel_width - 84
+
+        self.help_title.x = panel_x + 42
+        self.help_title.y = panel_y + panel_height - 72
+        self.help_body.x = panel_x + 42
+        self.help_body.y = panel_y + panel_height - 108
+        self.help_body.width = panel_width - 84
+
+        main_button_width = panel_width - 84
+        main_button_x = panel_x + 42
+        main_button_height = 56
+        main_button_gap = 16
+        main_button_y = panel_y + 56
+        for index, button in enumerate(reversed(self.main_menu_buttons)):
+            button.set_bounds(
+                main_button_x,
+                main_button_y + index * (main_button_height + main_button_gap),
+                main_button_width,
+                main_button_height,
+            )
+
+        help_button_width = (panel_width - 98) / 2
+        help_button_y = panel_y + 38
+        self.help_menu_buttons[0].set_bounds(panel_x + 42, help_button_y, help_button_width, 52)
+        self.help_menu_buttons[1].set_bounds(panel_x + 56 + help_button_width, help_button_y, help_button_width, 52)
+
+        self._update_menu_button_labels()
+        self._update_menu_hover(-1, -1)
+
+    def _update_menu_button_labels(self) -> None:
+        start_text = "계속하기" if self.game_started else "게임 시작"
+        self.main_menu_buttons[0].label.text = start_text
+        self.main_menu_buttons[0].text = start_text
+        help_start_text = "바로 시작" if not self.game_started else "게임으로 돌아가기"
+        self.help_menu_buttons[1].label.text = help_start_text
+        self.help_menu_buttons[1].text = help_start_text
+
+    def _current_menu_buttons(self) -> list[MenuButton]:
+        if self.menu_state == "help":
+            return self.help_menu_buttons
+        if self.menu_state == "main":
+            return self.main_menu_buttons
+        return []
+
+    def _update_menu_hover(self, x: float, y: float) -> None:
+        hovered_button = None
+        for button in self.main_menu_buttons + self.help_menu_buttons:
+            button.set_hovered(False)
+
+        for button in self._current_menu_buttons():
+            if button.contains(x, y):
+                button.set_hovered(True)
+                hovered_button = button
+                break
+
+        self.menu_hover_button = hovered_button
+
+    def open_menu(self, state: str = "main") -> None:
+        self.menu_state = state
+        if self.mouse_captured and not pyglet.options["headless"]:
+            self.set_capture(False)
+        self._layout_menu_ui()
+
+    def show_main_menu(self) -> None:
+        self.open_menu("main")
+
+    def show_help_menu(self) -> None:
+        self.open_menu("help")
+
+    def start_game(self) -> None:
+        if not self.game_started:
+            self.reset_camera()
+            self.game_started = True
+        self.menu_state = None
+        self._update_menu_button_labels()
+        if not pyglet.options["headless"]:
+            self.set_capture(True)
+
     def _update_projection(self) -> None:
         aspect = self.width / max(self.height, 1)
         self.projection = Mat4.perspective_projection(aspect, 0.1, 250.0, 75.0)
@@ -457,7 +680,7 @@ class FpsSandboxWindow(pyglet.window.Window):
         self.instructions.text = (
             "WASD move   SPACE jump   SHIFT sprint\n"
             "Release SPACE, then hold it in midair to glide\n"
-            "Mouse look   TAB toggle cursor capture   ESC release or close\n"
+            "Mouse look   TAB toggle cursor capture   ESC menu\n"
             "Left click recaptures the mouse   R resets the start position"
         )
         self.instructions.width = max(self.width - 32, 280)
@@ -466,6 +689,7 @@ class FpsSandboxWindow(pyglet.window.Window):
 
         self.crosshair.x = self.width // 2
         self.crosshair.y = self.height // 2
+        self._layout_menu_ui()
 
     def set_capture(self, enabled: bool) -> None:
         self.mouse_captured = enabled
@@ -489,23 +713,46 @@ class FpsSandboxWindow(pyglet.window.Window):
         return super().on_resize(width, height)
 
     def on_mouse_press(self, x: int, y: int, button: int, modifiers: int) -> None:
+        if self.menu_state is not None and button == mouse.LEFT:
+            for menu_button in self._current_menu_buttons():
+                if menu_button.contains(x, y):
+                    menu_button.action()
+                    return
+            return
         if button == mouse.LEFT and not self.mouse_captured and not pyglet.options["headless"]:
             self.set_capture(True)
 
     def on_mouse_motion(self, x: int, y: int, dx: int, dy: int) -> None:
+        if self.menu_state is not None:
+            self._update_menu_hover(x, y)
+            return
         if not self.mouse_captured:
             return
         self.yaw += dx * MOUSE_SENSITIVITY
         self.pitch = max(-1.54, min(1.54, self.pitch + dy * MOUSE_SENSITIVITY))
 
     def on_key_press(self, symbol: int, modifiers: int) -> None:
+        if self.menu_state == "help":
+            if symbol == key.ESCAPE:
+                self.show_main_menu()
+            elif symbol in (key.ENTER, key.SPACE):
+                self.start_game()
+            return
+
+        if self.menu_state == "main":
+            if symbol == key.ESCAPE:
+                if self.game_started:
+                    self.start_game()
+                else:
+                    self.close()
+            elif symbol in (key.ENTER, key.SPACE):
+                self.start_game()
+            return
+
         if symbol == key.TAB and not pyglet.options["headless"]:
             self.set_capture(not self.mouse_captured)
         elif symbol == key.ESCAPE:
-            if self.mouse_captured and not pyglet.options["headless"]:
-                self.set_capture(False)
-            else:
-                self.close()
+            self.show_main_menu()
         elif symbol == key.SPACE:
             self.jump_requested = True
         elif symbol == key.R:
@@ -518,6 +765,9 @@ class FpsSandboxWindow(pyglet.window.Window):
             self.is_gliding = False
 
     def update(self, dt: float) -> None:
+        if self.menu_state is not None:
+            return
+
         dt = min(dt, 0.05)
         move = Vec3(0.0, 0.0, 0.0)
         ground_forward = self._ground_forward_vector()
@@ -577,10 +827,23 @@ class FpsSandboxWindow(pyglet.window.Window):
             obj.mesh.draw(GL_TRIANGLES)
 
         glDisable(GL_DEPTH_TEST)
-        self.instructions.draw()
-        self.status.draw()
-        if self.mouse_captured:
-            self.crosshair.draw()
+        if self.menu_state is None:
+            self.instructions.draw()
+            self.status.draw()
+            if self.mouse_captured:
+                self.crosshair.draw()
+        else:
+            self.menu_overlay.draw()
+            self.menu_panel.draw()
+            self.menu_accent.draw()
+            if self.menu_state == "help":
+                self.help_title.draw()
+                self.help_body.draw()
+            else:
+                self.menu_title.draw()
+                self.menu_subtitle.draw()
+            for button in self._current_menu_buttons():
+                button.draw()
         glEnable(GL_DEPTH_TEST)
 
 

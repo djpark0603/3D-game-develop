@@ -4,6 +4,7 @@ Python first-person 3D sandbox prototype.
 
 The current build provides:
 
+- A start screen with menu buttons
 - A free-look first-person camera
 - Block collision and grounded movement
 - Gravity, jumping, and glide descent
@@ -27,15 +28,18 @@ python -m pip install -r requirements.txt
 python main.py
 ```
 
+The game opens on the title screen first.
+
 ## Controls
 
+- Title screen buttons: `게임 시작`, `게임 방법`, `게임 종료`
 - `W`, `A`, `S`, `D`: move
 - `Mouse`: look around
 - `Space`: jump
 - Release `Space`, then hold it again in midair to glide and fall slowly
 - `Shift`: sprint
-- `Tab`: toggle mouse capture
-- `Esc`: release mouse or close the game
+- `Tab`: toggle mouse capture during play
+- `Esc`: open or close the menu
 - `R`: reset camera position
 
 ## Next Steps
