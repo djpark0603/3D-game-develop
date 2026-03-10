@@ -28,7 +28,12 @@ WINDOW_HEIGHT = 720
 MOUSE_SENSITIVITY = 0.0025
 MOVE_SPEED = 8.0
 SPRINT_SPEED = 14.0
-VERTICAL_SPEED = 7.0
+JUMP_SPEED = 11.0
+GRAVITY = 30.0
+MAX_FALL_SPEED = 25.0
+PLAYER_RADIUS = 0.35
+PLAYER_HEIGHT = 1.8
+PLAYER_EYE_HEIGHT = 1.62
 
 VERTEX_SHADER = """
 #version 150
@@ -82,6 +87,22 @@ void main() {
 
 
 @dataclass(frozen=True)
+class Aabb:
+    minimum: Vec3
+    maximum: Vec3
+
+    def intersects(self, other: "Aabb") -> bool:
+        return (
+            self.minimum.x < other.maximum.x
+            and self.maximum.x > other.minimum.x
+            and self.minimum.y < other.maximum.y
+            and self.maximum.y > other.minimum.y
+            and self.minimum.z < other.maximum.z
+            and self.maximum.z > other.minimum.z
+        )
+
+
+@dataclass(frozen=True)
 class SceneObject:
     mesh: object
     position: Vec3
@@ -89,12 +110,17 @@ class SceneObject:
     tint: tuple[float, float, float, float]
     rotation_y: float = 0.0
     grid_strength: float = 0.0
+    collidable: bool = True
 
     def model_matrix(self) -> Mat4:
         matrix = Mat4().translate(self.position)
         if self.rotation_y:
             matrix = matrix.rotate(self.rotation_y, Vec3(0.0, 1.0, 0.0))
         return matrix.scale(self.scale)
+
+    def bounds(self) -> Aabb:
+        half_scale = Vec3(self.scale.x * 0.5, self.scale.y * 0.5, self.scale.z * 0.5)
+        return Aabb(self.position - half_scale, self.position + half_scale)
 
 
 def build_cube_mesh(program: ShaderProgram):
@@ -198,7 +224,11 @@ class FpsSandboxWindow(pyglet.window.Window):
 
         self.yaw = 0.0
         self.pitch = -0.08
-        self.camera_position = Vec3(0.0, 1.8, 8.0)
+        self.player_position = Vec3(0.0, 0.0, 8.0)
+        self.camera_position = Vec3(0.0, PLAYER_EYE_HEIGHT, 8.0)
+        self.vertical_velocity = 0.0
+        self.is_grounded = True
+        self.jump_requested = False
         self.light_dir = (0.5, -1.0, 0.35)
         self.mouse_captured = False
 
@@ -206,6 +236,7 @@ class FpsSandboxWindow(pyglet.window.Window):
         self.cube_mesh = build_cube_mesh(self.shader)
         self.plane_mesh = build_plane_mesh(self.shader)
         self.scene = self._build_scene()
+        self.colliders = [obj for obj in self.scene if obj.collidable]
 
         self.instructions = pyglet.text.Label(
             "",
@@ -365,9 +396,62 @@ class FpsSandboxWindow(pyglet.window.Window):
     def _right_vector(self) -> Vec3:
         return Vec3(math.cos(self.yaw), 0.0, math.sin(self.yaw)).normalize()
 
+    def _player_bounds(self, position: Vec3 | None = None) -> Aabb:
+        player_position = self.player_position if position is None else position
+        return Aabb(
+            Vec3(player_position.x - PLAYER_RADIUS, player_position.y, player_position.z - PLAYER_RADIUS),
+            Vec3(player_position.x + PLAYER_RADIUS, player_position.y + PLAYER_HEIGHT, player_position.z + PLAYER_RADIUS),
+        )
+
+    def _update_camera_position(self) -> None:
+        self.camera_position = Vec3(
+            self.player_position.x,
+            self.player_position.y + PLAYER_EYE_HEIGHT,
+            self.player_position.z,
+        )
+
+    def _move_player_axis(self, amount: float, axis: str) -> bool:
+        if amount == 0.0:
+            return False
+
+        if axis == "x":
+            candidate = Vec3(self.player_position.x + amount, self.player_position.y, self.player_position.z)
+        elif axis == "y":
+            candidate = Vec3(self.player_position.x, self.player_position.y + amount, self.player_position.z)
+        else:
+            candidate = Vec3(self.player_position.x, self.player_position.y, self.player_position.z + amount)
+
+        landed = False
+        for collider in self.colliders:
+            collider_bounds = collider.bounds()
+            player_bounds = self._player_bounds(candidate)
+            if not player_bounds.intersects(collider_bounds):
+                continue
+
+            if axis == "x":
+                if amount > 0.0:
+                    candidate = Vec3(collider_bounds.minimum.x - PLAYER_RADIUS, candidate.y, candidate.z)
+                else:
+                    candidate = Vec3(collider_bounds.maximum.x + PLAYER_RADIUS, candidate.y, candidate.z)
+            elif axis == "z":
+                if amount > 0.0:
+                    candidate = Vec3(candidate.x, candidate.y, collider_bounds.minimum.z - PLAYER_RADIUS)
+                else:
+                    candidate = Vec3(candidate.x, candidate.y, collider_bounds.maximum.z + PLAYER_RADIUS)
+            else:
+                if amount > 0.0:
+                    candidate = Vec3(candidate.x, collider_bounds.minimum.y - PLAYER_HEIGHT, candidate.z)
+                else:
+                    candidate = Vec3(candidate.x, collider_bounds.maximum.y, candidate.z)
+                    landed = True
+                self.vertical_velocity = 0.0
+
+        self.player_position = candidate
+        return landed
+
     def _refresh_labels(self) -> None:
         self.instructions.text = (
-            "WASD move   SPACE / CTRL rise-fall   SHIFT sprint\n"
+            "WASD move   SPACE jump   SHIFT sprint\n"
             "Mouse look   TAB toggle cursor capture   ESC release or close\n"
             "Left click recaptures the mouse   R resets the start position"
         )
@@ -383,9 +467,13 @@ class FpsSandboxWindow(pyglet.window.Window):
         self.set_exclusive_mouse(enabled)
 
     def reset_camera(self) -> None:
-        self.camera_position = Vec3(0.0, 1.8, 8.0)
+        self.player_position = Vec3(0.0, 0.0, 8.0)
         self.yaw = 0.0
         self.pitch = -0.08
+        self.vertical_velocity = 0.0
+        self.is_grounded = True
+        self.jump_requested = False
+        self._update_camera_position()
 
     def on_resize(self, width: int, height: int):
         glViewport(0, 0, width, height)
@@ -411,12 +499,14 @@ class FpsSandboxWindow(pyglet.window.Window):
                 self.set_capture(False)
             else:
                 self.close()
+        elif symbol == key.SPACE:
+            self.jump_requested = True
         elif symbol == key.R:
             self.reset_camera()
 
     def update(self, dt: float) -> None:
+        dt = min(dt, 0.05)
         move = Vec3(0.0, 0.0, 0.0)
-        vertical = 0.0
         ground_forward = self._ground_forward_vector()
         right = self._right_vector()
 
@@ -428,21 +518,27 @@ class FpsSandboxWindow(pyglet.window.Window):
             move += right
         if self.keys[key.A]:
             move -= right
-        if self.keys[key.SPACE]:
-            vertical += 1.0
-        if self.keys[key.LCTRL] or self.keys[key.RCTRL]:
-            vertical -= 1.0
 
         if move.length() > 0:
             move = move.normalize()
 
+        if self.jump_requested and self.is_grounded:
+            self.vertical_velocity = JUMP_SPEED
+            self.is_grounded = False
+        self.jump_requested = False
+
+        self.vertical_velocity = max(self.vertical_velocity - GRAVITY * dt, -MAX_FALL_SPEED)
         horizontal_speed = SPRINT_SPEED if self.keys[key.LSHIFT] or self.keys[key.RSHIFT] else MOVE_SPEED
-        self.camera_position += move * horizontal_speed * dt
-        self.camera_position += Vec3(0.0, vertical * VERTICAL_SPEED * dt, 0.0)
+        horizontal_move = move * horizontal_speed * dt
+        self._move_player_axis(horizontal_move.x, "x")
+        self._move_player_axis(horizontal_move.z, "z")
+        self.is_grounded = self._move_player_axis(self.vertical_velocity * dt, "y")
+        self._update_camera_position()
 
         self.status.text = (
             f"pos=({self.camera_position.x:6.2f}, {self.camera_position.y:5.2f}, {self.camera_position.z:6.2f})   "
-            f"yaw={math.degrees(self.yaw):6.1f}   pitch={math.degrees(self.pitch):5.1f}"
+            f"yaw={math.degrees(self.yaw):6.1f}   pitch={math.degrees(self.pitch):5.1f}   "
+            f"grounded={'yes' if self.is_grounded else 'no '}   vy={self.vertical_velocity:6.2f}"
         )
 
     def on_draw(self) -> None:
